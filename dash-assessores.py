@@ -115,18 +115,9 @@ if uploaded_files:
     # Ordenar os clientes pela receita no mês
     ranking_clientes = clientes_por_receita.sort_values(by='Receita no Mês', ascending=False)
 
-    # Exibir ranking dos clientes
+    # Exibir ranking dos clientes em ordem decrescente
     st.subheader(f"Ranking de Clientes - {assessor_selecionado} - {mes_selecionado}")
     st.dataframe(ranking_clientes)
-
-    # Gráfico de barras para os clientes
-    fig_clientes = px.bar(ranking_clientes, x='Cliente', y='Receita no Mês', 
-                          title=f"Clientes com Maior Receita - {assessor_selecionado}",
-                          labels={'Cliente': 'Cliente', 'Receita no Mês': 'Receita (R$)'},
-                          text='Receita no Mês')
-    fig_clientes.update_traces(texttemplate='%{text:.2f}', textposition='outside')
-    fig_clientes.update_layout(xaxis_tickangle=-45)
-    st.plotly_chart(fig_clientes)
 
     # Gráfico de Radar
     categorias = colunas_receita[:-1]
@@ -190,3 +181,4 @@ if uploaded_files:
     )
 else:
     st.write("Por favor, carregue pelo menos um arquivo Excel para visualizar os dados.")
+
