@@ -110,7 +110,11 @@ if uploaded_files:
     clientes_por_assessor = data_mes.groupby('Nome Assessor')['Cliente'].nunique().reset_index()
     clientes_por_assessor = clientes_por_assessor.rename(columns={'Cliente': 'Número de Clientes'})
 
-    # Gráfico de barras para o número de clientes por assessor
+    # Ordenar os assessores com base no ranking de receita
+    clientes_por_assessor['Ordem Receita'] = clientes_por_assessor['Nome Assessor'].map(ranking.set_index('Nome Assessor')['Receita no Mês'])
+    clientes_por_assessor = clientes_por_assessor.sort_values(by='Ordem Receita', ascending=False)
+
+    # Gráfico de barras para o número de clientes por assessor, com ordem ajustada
     fig_clientes = px.bar(clientes_por_assessor, x='Nome Assessor', y='Número de Clientes', 
                           title="Número de Clientes por Assessor",
                           labels={'Nome Assessor': 'Assessor', 'Número de Clientes': 'Número de Clientes'},
@@ -199,4 +203,3 @@ if uploaded_files:
         unsafe_allow_html=True
     )
 else:
-    st.write("Por favor, carregue pelo menos um arquivo Excel para visualizar os dados.")
