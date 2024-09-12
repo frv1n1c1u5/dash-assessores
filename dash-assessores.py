@@ -106,6 +106,19 @@ if uploaded_files:
     fig_ranking.update_layout(xaxis_tickangle=-45)
     st.plotly_chart(fig_ranking)
 
+    # Adicionar o gráfico de número de clientes por assessor
+    clientes_por_assessor = data_mes.groupby('Nome Assessor')['Cliente'].nunique().reset_index()
+    clientes_por_assessor = clientes_por_assessor.rename(columns={'Cliente': 'Número de Clientes'})
+
+    # Gráfico de barras para o número de clientes por assessor
+    fig_clientes = px.bar(clientes_por_assessor, x='Nome Assessor', y='Número de Clientes', 
+                          title="Número de Clientes por Assessor",
+                          labels={'Nome Assessor': 'Assessor', 'Número de Clientes': 'Número de Clientes'},
+                          text='Número de Clientes')
+    fig_clientes.update_traces(texttemplate='%{text:.0f}', textposition='outside')
+    fig_clientes.update_layout(xaxis_tickangle=-45)
+    st.plotly_chart(fig_clientes)
+
     # Filtrar os dados para o assessor selecionado
     dados_assessor = data_mes[data_mes['Nome Assessor'] == assessor_selecionado]
 
