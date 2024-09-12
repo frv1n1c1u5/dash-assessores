@@ -91,7 +91,7 @@ if uploaded_files:
 
     # Ranking dos assessores por receita no mês
     ranking = receita_por_assessor[['Nome Assessor', 'Receita no Mês']].sort_values(by='Receita no Mês', ascending=False)
-    
+
     # Selecionar o assessor (movido para a barra lateral)
     assessor_selecionado = st.sidebar.selectbox("Selecione um Assessor", options=ranking['Nome Assessor'])
 
@@ -107,24 +107,30 @@ if uploaded_files:
     st.plotly_chart(fig_ranking)
 
     # Filtrar os dados para o assessor selecionado
-    dados_assessor = receita_por_assessor[receita_por_assessor['Nome Assessor'] == assessor_selecionado]
+    dados_assessor = data_mes[data_mes['Nome Assessor'] == assessor_selecionado]
 
-    # Calcular as somas das receitas por categoria
-    somas_receitas = dados_assessor[colunas_receita[:-1]].iloc[0].to_dict()
+    # Filtrar os clientes que geraram mais receita
+    clientes_por_receita = dados_assessor.groupby('Cliente')['Receita no Mês'].sum().reset_index()
 
-    # Gráfico de barras para categorias de receita
-    fig_categorias = px.bar(pd.DataFrame(somas_receitas.items(), columns=['Categoria', 'Valor']), 
-                            x='Categoria', y='Valor', 
-                            title=f"Receitas por Categoria de {assessor_selecionado}",
-                            labels={'Valor': 'Receita (R$)'},
-                            text='Valor')
-    fig_categorias.update_traces(texttemplate='%{text:.2f}', textposition='outside')
-    fig_categorias.update_layout(xaxis_tickangle=-45)
-    st.plotly_chart(fig_categorias)
+    # Ordenar os clientes pela receita no mês
+    ranking_clientes = clientes_por_receita.sort_values(by='Receita no Mês', ascending=False)
+
+    # Exibir ranking dos clientes
+    st.subheader(f"Ranking de Clientes - {assessor_selecionado} - {mes_selecionado}")
+    st.dataframe(ranking_clientes)
+
+    # Gráfico de barras para os clientes
+    fig_clientes = px.bar(ranking_clientes, x='Cliente', y='Receita no Mês', 
+                          title=f"Clientes com Maior Receita - {assessor_selecionado}",
+                          labels={'Cliente': 'Cliente', 'Receita no Mês': 'Receita (R$)'},
+                          text='Receita no Mês')
+    fig_clientes.update_traces(texttemplate='%{text:.2f}', textposition='outside')
+    fig_clientes.update_layout(xaxis_tickangle=-45)
+    st.plotly_chart(fig_clientes)
 
     # Gráfico de Radar
     categorias = colunas_receita[:-1]
-    valores = [somas_receitas[cat] for cat in categorias]
+    valores = dados_assessor[categorias].sum().values
     
     fig_radar = go.Figure()
 
