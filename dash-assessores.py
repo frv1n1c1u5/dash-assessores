@@ -202,4 +202,3 @@ if uploaded_files:
         """,
         unsafe_allow_html=True
     )
-else:
