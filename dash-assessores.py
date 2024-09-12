@@ -112,8 +112,14 @@ if uploaded_files:
     # Filtrar os clientes que geraram mais receita
     clientes_por_receita = dados_assessor.groupby('Cliente')['Receita no Mês'].sum().reset_index()
 
+    # Converter o código do cliente para string
+    clientes_por_receita['Cliente'] = clientes_por_receita['Cliente'].astype(str)
+
     # Ordenar os clientes pela receita no mês
     ranking_clientes = clientes_por_receita.sort_values(by='Receita no Mês', ascending=False)
+
+    # Formatar a coluna de receita em BRL
+    ranking_clientes['Receita no Mês'] = ranking_clientes['Receita no Mês'].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
     # Exibir ranking dos clientes em ordem decrescente
     st.subheader(f"Ranking de Clientes - {assessor_selecionado} - {mes_selecionado}")
@@ -181,4 +187,3 @@ if uploaded_files:
     )
 else:
     st.write("Por favor, carregue pelo menos um arquivo Excel para visualizar os dados.")
-
