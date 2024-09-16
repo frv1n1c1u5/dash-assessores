@@ -25,7 +25,7 @@ def get_last_6_months():
     return months
 
 # Função para carregar dados dos arquivos Excel
-@st.cache  # Substituído para compatibilidade
+@st.cache
 def carregar_dados(uploaded_files):
     """
     Carrega e concatena os dados dos arquivos Excel fornecidos.
@@ -37,8 +37,8 @@ def carregar_dados(uploaded_files):
     pd.DataFrame: DataFrame concatenado com os dados de todos os meses.
     """
     all_data = []
-    colunas_necessarias = ['Assessor', 'Cliente', 'Receita Bovespa', 'Receita Futuros', 'Receita RF Bancários',
-                           'Receita RF Privados', 'Receita RF Públicos', 'Receita no Mês']
+    colunas_necessarias = ['Assessor', 'Cliente', 'Sexo', 'Receita Bovespa', 'Receita Futuros', 'Receita RF Bancários',
+                           'Receita RF Privados', 'Receita RF Públicos', 'Nascimento', 'Receita no Mês']
 
     for month, file in uploaded_files.items():
         try:
@@ -121,6 +121,15 @@ def processar_dados(data):
                        'Receita RF Privados', 'Receita RF Públicos', 'Receita no Mês']
     data[colunas_receita] = data[colunas_receita].fillna(0)
 
+    # Processar coluna 'Sexo'
+    data['Sexo'] = data['Sexo'].str.strip().str.capitalize()
+    data['Sexo'] = data['Sexo'].replace({'M': 'Masculino', 'F': 'Feminino'})
+
+    # Processar coluna 'Nascimento' para calcular a idade
+    data['Nascimento'] = pd.to_datetime(data['Nascimento'], errors='coerce')
+    today = pd.to_datetime('today')
+    data['Idade'] = data['Nascimento'].apply(lambda x: today.year - x.year - ((today.month, today.day) < (x.month, x.day)) if pd.notnull(x) else None)
+
     return data
 
 # Função para gerar gráficos
@@ -134,16 +143,23 @@ def gerar_graficos(data, months):
     """
     # Sidebar para selecionar filtros
     st.sidebar.title("Filtros")
-    meses_selecionados = st.sidebar.multiselect("Selecione o(s) Mês(es)", options=months, default=months)
+    meses_selecionados = st.sidebar.multiselect("Selecione o(s) Mês(es) para Receitas", options=months, default=months)
+    assessor_selecionado = st.sidebar.selectbox("Selecione um Assessor", options=sorted(data['Nome Assessor'].unique()))
 
-    # Filtrar os dados pelos meses selecionados
+    # Filtrar os dados pelos meses selecionados para receitas
     data_selecionada = data[data['Mês'].isin(meses_selecionados)]
 
-    # Verificar se há dados para os meses selecionados
-    if data_selecionada.empty:
-        st.warning(f"Não há dados disponíveis para os meses selecionados.")
+    # Filtrar dados pelo assessor selecionado
+    data_assessor = data[data['Nome Assessor'] == assessor_selecionado]
+
+    # Verificar se há dados para o assessor selecionado
+    if data_assessor.empty:
+        st.warning(f"O assessor {assessor_selecionado} não possui dados.")
         return
 
+    st.title(f"Dashboard de Receitas e Perfil de Clientes - {assessor_selecionado}")
+
+    # Gráficos de Receitas (mesmo que antes)
     # Agrupar os dados por assessor e somar as receitas
     colunas_receita = ['Receita Bovespa', 'Receita Futuros', 'Receita RF Bancários',
                        'Receita RF Privados', 'Receita RF Públicos', 'Receita no Mês']
@@ -151,11 +167,6 @@ def gerar_graficos(data, months):
 
     # Ranking dos assessores por receita
     ranking = receita_por_assessor[['Nome Assessor', 'Receita no Mês']].sort_values(by='Receita no Mês', ascending=False)
-
-    # Selecionar o assessor
-    assessor_selecionado = st.sidebar.selectbox("Selecione um Assessor", options=ranking['Nome Assessor'])
-
-    st.title(f"Dashboard de Receitas - Meses Selecionados")
 
     # Gráfico de barras para o ranking de assessores
     fig_ranking = px.bar(ranking, x='Nome Assessor', y='Receita no Mês',
@@ -166,68 +177,15 @@ def gerar_graficos(data, months):
     fig_ranking.update_layout(xaxis_tickangle=-45)
     st.plotly_chart(fig_ranking)
 
-    # Contar clientes únicos por assessor considerando o assessor com maior receita para cada cliente
-    # Calcular a receita total por cliente e assessor
-    receita_cliente_assessor = data_selecionada.groupby(['Cliente', 'Nome Assessor'])['Receita no Mês'].sum().reset_index()
-
-    # Identificar o assessor com maior receita para cada cliente
-    idx = receita_cliente_assessor.groupby('Cliente')['Receita no Mês'].idxmax()
-    clientes_assessor_principal = receita_cliente_assessor.loc[idx]
-
-    # Obter pares únicos de assessor e cliente principal
-    unique_clients = clientes_assessor_principal[['Nome Assessor', 'Cliente']]
-
-    # Contar o número de clientes únicos por assessor
-    clientes_por_assessor = unique_clients.groupby('Nome Assessor').size().reset_index(name='Número de Clientes')
-
-    # Ordenar os assessores com base no ranking de receita
-    clientes_por_assessor['Ordem Receita'] = clientes_por_assessor['Nome Assessor'].map(
-        ranking.set_index('Nome Assessor')['Receita no Mês'])
-    clientes_por_assessor = clientes_por_assessor.sort_values(by='Ordem Receita', ascending=False)
-
-    # Gráfico de barras para o número de clientes por assessor
-    fig_clientes = px.bar(clientes_por_assessor, x='Nome Assessor', y='Número de Clientes',
-                          title="Número de Clientes Únicos por Assessor",
-                          labels={'Nome Assessor': 'Assessor', 'Número de Clientes': 'Número de Clientes'},
-                          text='Número de Clientes')
-    fig_clientes.update_traces(texttemplate='%{text:.0f}', textposition='outside')
-    fig_clientes.update_layout(xaxis_tickangle=-45)
-    st.plotly_chart(fig_clientes)
-
-    # Filtrar os dados para o assessor selecionado
-    dados_assessor = data_selecionada[data_selecionada['Nome Assessor'] == assessor_selecionado]
-
-    # Verificar se há dados para o assessor selecionado
-    if dados_assessor.empty:
-        st.warning(f"O assessor {assessor_selecionado} não possui dados nos meses selecionados.")
-        return
-
-    # Filtrar os clientes que geraram mais receita
-    clientes_por_receita = dados_assessor.groupby('Cliente')['Receita no Mês'].sum().reset_index()
-
-    # Converter o código do cliente para string
-    clientes_por_receita['Cliente'] = clientes_por_receita['Cliente'].astype(str)
-
-    # Ordenar os clientes pela receita
-    ranking_clientes = clientes_por_receita.sort_values(by='Receita no Mês', ascending=False)
-
-    # Formatar a coluna de receita em BRL
-    ranking_clientes['Receita no Mês'] = ranking_clientes['Receita no Mês'].apply(
-        lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-
-    # Exibir ranking dos clientes
-    st.subheader(f"Ranking de Clientes - {assessor_selecionado}")
-    st.dataframe(ranking_clientes)
-
-    # Gráfico de Radar
-    categorias = colunas_receita[:-1]
-    valores = dados_assessor[categorias].sum().values
+    # Gráfico de Radar de Receitas por Produto para o Assessor Selecionado
+    dados_assessor_receita = data_selecionada[data_selecionada['Nome Assessor'] == assessor_selecionado]
+    valores = dados_assessor_receita[colunas_receita[:-1]].sum().values
 
     fig_radar = go.Figure()
 
     fig_radar.add_trace(go.Scatterpolar(
         r=valores,
-        theta=categorias,
+        theta=colunas_receita[:-1],
         fill='toself',
         name=assessor_selecionado
     ))
@@ -237,10 +195,38 @@ def gerar_graficos(data, months):
             radialaxis=dict(visible=True)
         ),
         showlegend=True,
-        title=f"Gráfico de Radar - Receita por Produto de {assessor_selecionado}"
+        title=f"Receita por Produto de {assessor_selecionado}"
     )
 
     st.plotly_chart(fig_radar)
+
+    # Análise de Gênero
+    genero_counts = data_assessor[['Cliente', 'Sexo']].drop_duplicates()['Sexo'].value_counts().reset_index()
+    genero_counts.columns = ['Sexo', 'Contagem']
+
+    fig_genero = px.pie(genero_counts, values='Contagem', names='Sexo',
+                        title='Distribuição por Gênero')
+    st.plotly_chart(fig_genero)
+
+    # Análise de Idade
+    idade_bins = [0, 18, 25, 35, 45, 55, 65, 100]
+    labels = ['<18', '18-24', '25-34', '35-44', '45-54', '55-64', '65+']
+    data_assessor['Faixa Etária'] = pd.cut(data_assessor['Idade'], bins=idade_bins, labels=labels, right=False)
+
+    faixa_etaria_counts = data_assessor[['Cliente', 'Faixa Etária']].drop_duplicates()['Faixa Etária'].value_counts().sort_index().reset_index()
+    faixa_etaria_counts.columns = ['Faixa Etária', 'Contagem']
+
+    fig_idade = px.bar(faixa_etaria_counts, x='Faixa Etária', y='Contagem',
+                       title='Distribuição por Faixa Etária',
+                       labels={'Faixa Etária': 'Faixa Etária', 'Contagem': 'Número de Clientes'},
+                       text='Contagem')
+    fig_idade.update_traces(textposition='outside')
+    st.plotly_chart(fig_idade)
+
+    # Exibir tabela de clientes com gênero e idade
+    st.subheader(f"Clientes de {assessor_selecionado}")
+    clientes_info = data_assessor[['Cliente', 'Sexo', 'Idade']].drop_duplicates()
+    st.dataframe(clientes_info)
 
     # Funcionalidade para exportar os dados filtrados
     st.sidebar.title("Exportar Dados")
@@ -250,20 +236,20 @@ def gerar_graficos(data, months):
         if export_format == 'Excel':
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                receita_por_assessor.to_excel(writer, sheet_name='Receita por Assessor', index=False)
+                clientes_info.to_excel(writer, sheet_name='Clientes', index=False)
             output.seek(0)
             st.sidebar.download_button(
                 label="Download Excel",
                 data=output,
-                file_name=f'dados_filtrados.xlsx',
+                file_name=f'clientes_{assessor_selecionado}.xlsx',
                 mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             )
         elif export_format == 'CSV':
-            csv = receita_por_assessor.to_csv(index=False)
+            csv = clientes_info.to_csv(index=False)
             st.sidebar.download_button(
                 label="Download CSV",
                 data=csv,
-                file_name=f'dados_filtrados.csv',
+                file_name=f'clientes_{assessor_selecionado}.csv',
                 mime='text/csv',
             )
 
@@ -298,4 +284,4 @@ def main():
         st.info('Por favor, carregue os arquivos Excel para visualizar o dashboard.')
 
 if __name__ == "__main__":
-    main()
+    main(
