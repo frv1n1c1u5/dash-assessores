@@ -37,15 +37,23 @@ def carregar_dados(uploaded_files):
     pd.DataFrame: DataFrame concatenado com os dados de todos os meses.
     """
     all_data = []
-    colunas_necessarias = ['Assessor', 'Cliente', 'Sexo', 'Receita Bovespa', 'Receita Futuros', 'Receita RF Bancários',
-                           'Receita RF Privados', 'Receita RF Públicos', 'Nascimento', 'Receita no Mês']
+    colunas_obrigatorias = ['Assessor', 'Cliente', 'Receita Bovespa', 'Receita Futuros', 
+                            'Receita RF Bancários', 'Receita RF Privados', 'Receita RF Públicos', 
+                            'Receita no Mês']
+
+    colunas_opcionais = ['Sexo', 'Data de Nascimento']
 
     for month, file in uploaded_files.items():
         try:
             data = pd.read_excel(file)
-            if not set(colunas_necessarias).issubset(data.columns):
-                st.error(f"O arquivo para {month} não contém todas as colunas necessárias.")
+            # Verificar se as colunas obrigatórias estão presentes
+            if not set(colunas_obrigatorias).issubset(data.columns):
+                st.error(f"O arquivo para {month} não contém todas as colunas obrigatórias.")
                 continue
+            # Verificar colunas opcionais e adicioná-las se estiverem ausentes
+            for col in colunas_opcionais:
+                if col not in data.columns:
+                    data[col] = None
             data['Mês'] = month  # Adicionar uma coluna com o mês
             all_data.append(data)
         except Exception as e:
@@ -121,14 +129,21 @@ def processar_dados(data):
                        'Receita RF Privados', 'Receita RF Públicos', 'Receita no Mês']
     data[colunas_receita] = data[colunas_receita].fillna(0)
 
-    # Processar coluna 'Sexo'
-    data['Sexo'] = data['Sexo'].str.strip().str.capitalize()
-    data['Sexo'] = data['Sexo'].replace({'M': 'Masculino', 'F': 'Feminino'})
+    # Processar coluna 'Sexo' se existir
+    if 'Sexo' in data.columns:
+        data['Sexo'] = data['Sexo'].astype(str).str.strip().str.capitalize()
+        data['Sexo'] = data['Sexo'].replace({'M': 'Masculino', 'F': 'Feminino'})
+    else:
+        data['Sexo'] = None
 
-    # Processar coluna 'Nascimento' para calcular a idade
-    data['Nascimento'] = pd.to_datetime(data['Nascimento'], errors='coerce')
-    today = pd.to_datetime('today')
-    data['Idade'] = data['Nascimento'].apply(lambda x: today.year - x.year - ((today.month, today.day) < (x.month, x.day)) if pd.notnull(x) else None)
+    # Processar coluna 'Data de Nascimento' se existir para calcular a idade
+    if 'Data de Nascimento' in data.columns:
+        data['Data de Nascimento'] = pd.to_datetime(data['Data de Nascimento'], errors='coerce')
+        today = pd.to_datetime('today')
+        data['Idade'] = data['Data de Nascimento'].apply(lambda x: today.year - x.year - ((today.month, today.day) < (x.month, x.day)) if pd.notnull(x) else None)
+    else:
+        data['Data de Nascimento'] = None
+        data['Idade'] = None
 
     return data
 
@@ -201,27 +216,33 @@ def gerar_graficos(data, months):
     st.plotly_chart(fig_radar)
 
     # Análise de Gênero
-    genero_counts = data_assessor[['Cliente', 'Sexo']].drop_duplicates()['Sexo'].value_counts().reset_index()
-    genero_counts.columns = ['Sexo', 'Contagem']
+    if data_assessor['Sexo'].notnull().any():
+        genero_counts = data_assessor[['Cliente', 'Sexo']].drop_duplicates()['Sexo'].value_counts().reset_index()
+        genero_counts.columns = ['Sexo', 'Contagem']
 
-    fig_genero = px.pie(genero_counts, values='Contagem', names='Sexo',
-                        title='Distribuição por Gênero')
-    st.plotly_chart(fig_genero)
+        fig_genero = px.pie(genero_counts, values='Contagem', names='Sexo',
+                            title='Distribuição por Gênero')
+        st.plotly_chart(fig_genero)
+    else:
+        st.info("Dados de gênero não disponíveis para este assessor.")
 
     # Análise de Idade
-    idade_bins = [0, 18, 25, 35, 45, 55, 65, 100]
-    labels = ['<18', '18-24', '25-34', '35-44', '45-54', '55-64', '65+']
-    data_assessor['Faixa Etária'] = pd.cut(data_assessor['Idade'], bins=idade_bins, labels=labels, right=False)
+    if data_assessor['Idade'].notnull().any():
+        idade_bins = [0, 18, 25, 35, 45, 55, 65, 100]
+        labels = ['<18', '18-24', '25-34', '35-44', '45-54', '55-64', '65+']
+        data_assessor['Faixa Etária'] = pd.cut(data_assessor['Idade'], bins=idade_bins, labels=labels, right=False)
 
-    faixa_etaria_counts = data_assessor[['Cliente', 'Faixa Etária']].drop_duplicates()['Faixa Etária'].value_counts().sort_index().reset_index()
-    faixa_etaria_counts.columns = ['Faixa Etária', 'Contagem']
+        faixa_etaria_counts = data_assessor[['Cliente', 'Faixa Etária']].drop_duplicates()['Faixa Etária'].value_counts().sort_index().reset_index()
+        faixa_etaria_counts.columns = ['Faixa Etária', 'Contagem']
 
-    fig_idade = px.bar(faixa_etaria_counts, x='Faixa Etária', y='Contagem',
-                       title='Distribuição por Faixa Etária',
-                       labels={'Faixa Etária': 'Faixa Etária', 'Contagem': 'Número de Clientes'},
-                       text='Contagem')
-    fig_idade.update_traces(textposition='outside')
-    st.plotly_chart(fig_idade)
+        fig_idade = px.bar(faixa_etaria_counts, x='Faixa Etária', y='Contagem',
+                           title='Distribuição por Faixa Etária',
+                           labels={'Faixa Etária': 'Faixa Etária', 'Contagem': 'Número de Clientes'},
+                           text='Contagem')
+        fig_idade.update_traces(textposition='outside')
+        st.plotly_chart(fig_idade)
+    else:
+        st.info("Dados de idade não disponíveis para este assessor.")
 
     # Exibir tabela de clientes com gênero e idade
     st.subheader(f"Clientes de {assessor_selecionado}")
