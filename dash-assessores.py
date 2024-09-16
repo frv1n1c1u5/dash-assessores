@@ -3,46 +3,77 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 import io
-from datetime import datetime, timedelta
+from datetime import datetime
 import calendar
+from dateutil.relativedelta import relativedelta
+
+# Definir configurações iniciais da página
+st.set_page_config(
+    page_title="Dashboard de Receitas",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 # Função para obter os últimos 6 meses
 def get_last_6_months():
+    """
+    Retorna uma lista com os nomes dos últimos 6 meses no formato 'Mês Ano'.
+    """
     today = datetime.now()
     months = []
-    for i in range(7):
-        date = today - timedelta(days=30*i)
+    for i in range(6):
+        date = today - relativedelta(months=i)
         month_name = calendar.month_name[date.month]
         year = date.year
         months.append(f"{month_name} {year}")
-    return months
+    return months[::-1]  # Inverter a lista para ordem cronológica
 
-# Obter os últimos 6 meses
-months = get_last_6_months()
+# Função para carregar dados dos arquivos Excel
+@st.cache_data
+def carregar_dados(uploaded_files):
+    """
+    Carrega e concatena os dados dos arquivos Excel fornecidos.
 
-# Criar um dicionário para armazenar os arquivos carregados
-uploaded_files = {}
+    Parameters:
+    uploaded_files (dict): Dicionário com os meses e arquivos correspondentes.
 
-# Criar espaços de upload para cada mês
-st.title("Carregue os arquivos Excel para cada mês")
-for month in months:
-    uploaded_file = st.file_uploader(f"Arquivo para {month}", type="xlsx", key=month)
-    if uploaded_file:
-        uploaded_files[month] = uploaded_file
-
-if uploaded_files:
-    # Lista para armazenar os dataframes de cada arquivo
+    Returns:
+    pd.DataFrame: DataFrame concatenado com os dados de todos os meses.
+    """
     all_data = []
+    colunas_necessarias = ['Assessor', 'Cliente', 'Receita Bovespa', 'Receita Futuros', 'Receita RF Bancários',
+                           'Receita RF Privados', 'Receita RF Públicos', 'Receita no Mês']
 
     for month, file in uploaded_files.items():
-        # Carregar os dados do arquivo Excel
-        data = pd.read_excel(file)
-        data['Mês'] = month  # Adicionar uma coluna com o mês
-        all_data.append(data)
+        try:
+            data = pd.read_excel(file)
+            if not set(colunas_necessarias).issubset(data.columns):
+                st.error(f"O arquivo para {month} não contém todas as colunas necessárias.")
+                continue
+            data['Mês'] = month  # Adicionar uma coluna com o mês
+            all_data.append(data)
+        except Exception as e:
+            st.error(f"Erro ao ler o arquivo para {month}: {e}")
+            continue
 
-    # Concatenar todos os dataframes
-    data = pd.concat(all_data, ignore_index=True)
+    if all_data:
+        data = pd.concat(all_data, ignore_index=True)
+        return data
+    else:
+        return pd.DataFrame()
 
+# Função para processar os dados
+def processar_dados(data):
+    """
+    Processa os dados carregados, incluindo mapeamento de assessores e preenchimento de valores nulos.
+
+    Parameters:
+    data (pd.DataFrame): DataFrame com os dados carregados.
+
+    Returns:
+    pd.DataFrame: DataFrame processado.
+    """
     # Dicionário de assessores (códigos para nomes)
     assessores_dict = {
         '74930': 'Renato Parentoni',
@@ -73,12 +104,26 @@ if uploaded_files:
     }
 
     # Adicionar coluna com nomes dos assessores
-    data['Nome Assessor'] = data['Assessor'].astype(str).map(assessores_dict)
+    data['Assessor'] = data['Assessor'].astype(str)
+    data['Nome Assessor'] = data['Assessor'].map(assessores_dict)
+    data['Nome Assessor'] = data['Nome Assessor'].fillna('Assessor Desconhecido')
 
     # Substituir valores NaN por 0 para somar corretamente as receitas
-    colunas_receita = ['Receita Bovespa', 'Receita Futuros', 'Receita RF Bancários', 'Receita RF Privados', 'Receita RF Públicos', 'Receita no Mês']
+    colunas_receita = ['Receita Bovespa', 'Receita Futuros', 'Receita RF Bancários',
+                       'Receita RF Privados', 'Receita RF Públicos', 'Receita no Mês']
     data[colunas_receita] = data[colunas_receita].fillna(0)
 
+    return data
+
+# Função para gerar gráficos
+def gerar_graficos(data, months):
+    """
+    Gera os gráficos e elementos da interface do usuário.
+
+    Parameters:
+    data (pd.DataFrame): DataFrame com os dados processados.
+    months (list): Lista de meses disponíveis.
+    """
     # Sidebar para selecionar filtros
     st.sidebar.title("Filtros")
     mes_selecionado = st.sidebar.selectbox("Selecione o Mês", options=months)
@@ -87,18 +132,20 @@ if uploaded_files:
     data_mes = data[data['Mês'] == mes_selecionado]
 
     # Agrupar os dados por assessor e somar as receitas
+    colunas_receita = ['Receita Bovespa', 'Receita Futuros', 'Receita RF Bancários',
+                       'Receita RF Privados', 'Receita RF Públicos', 'Receita no Mês']
     receita_por_assessor = data_mes.groupby('Nome Assessor')[colunas_receita].sum().reset_index()
 
     # Ranking dos assessores por receita no mês
     ranking = receita_por_assessor[['Nome Assessor', 'Receita no Mês']].sort_values(by='Receita no Mês', ascending=False)
 
-    # Selecionar o assessor (movido para a barra lateral)
+    # Selecionar o assessor
     assessor_selecionado = st.sidebar.selectbox("Selecione um Assessor", options=ranking['Nome Assessor'])
 
     st.title(f"Dashboard de Receitas - {mes_selecionado}")
 
     # Gráfico de barras para o ranking de assessores
-    fig_ranking = px.bar(ranking, x='Nome Assessor', y='Receita no Mês', 
+    fig_ranking = px.bar(ranking, x='Nome Assessor', y='Receita no Mês',
                          title=f"Ranking de Assessores - {mes_selecionado}",
                          labels={'Nome Assessor': 'Assessor', 'Receita no Mês': 'Receita (R$)'},
                          text='Receita no Mês')
@@ -106,16 +153,17 @@ if uploaded_files:
     fig_ranking.update_layout(xaxis_tickangle=-45)
     st.plotly_chart(fig_ranking)
 
-    # Adicionar o gráfico de número de clientes por assessor
+    # Gráfico de número de clientes por assessor
     clientes_por_assessor = data_mes.groupby('Nome Assessor')['Cliente'].nunique().reset_index()
     clientes_por_assessor = clientes_por_assessor.rename(columns={'Cliente': 'Número de Clientes'})
 
     # Ordenar os assessores com base no ranking de receita
-    clientes_por_assessor['Ordem Receita'] = clientes_por_assessor['Nome Assessor'].map(ranking.set_index('Nome Assessor')['Receita no Mês'])
+    clientes_por_assessor['Ordem Receita'] = clientes_por_assessor['Nome Assessor'].map(
+        ranking.set_index('Nome Assessor')['Receita no Mês'])
     clientes_por_assessor = clientes_por_assessor.sort_values(by='Ordem Receita', ascending=False)
 
-    # Gráfico de barras para o número de clientes por assessor, com ordem ajustada
-    fig_clientes = px.bar(clientes_por_assessor, x='Nome Assessor', y='Número de Clientes', 
+    # Gráfico de barras para o número de clientes por assessor
+    fig_clientes = px.bar(clientes_por_assessor, x='Nome Assessor', y='Número de Clientes',
                           title="Número de Clientes por Assessor",
                           labels={'Nome Assessor': 'Assessor', 'Número de Clientes': 'Número de Clientes'},
                           text='Número de Clientes')
@@ -136,16 +184,17 @@ if uploaded_files:
     ranking_clientes = clientes_por_receita.sort_values(by='Receita no Mês', ascending=False)
 
     # Formatar a coluna de receita em BRL
-    ranking_clientes['Receita no Mês'] = ranking_clientes['Receita no Mês'].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+    ranking_clientes['Receita no Mês'] = ranking_clientes['Receita no Mês'].apply(
+        lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
-    # Exibir ranking dos clientes em ordem decrescente
+    # Exibir ranking dos clientes
     st.subheader(f"Ranking de Clientes - {assessor_selecionado} - {mes_selecionado}")
     st.dataframe(ranking_clientes)
 
     # Gráfico de Radar
     categorias = colunas_receita[:-1]
     valores = dados_assessor[categorias].sum().values
-    
+
     fig_radar = go.Figure()
 
     fig_radar.add_trace(go.Scatterpolar(
@@ -173,7 +222,7 @@ if uploaded_files:
         if export_format == 'Excel':
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                receita_por_assessor.to_excel(writer, sheet_name='Sheet1', index=False)
+                receita_por_assessor.to_excel(writer, sheet_name='Receita por Assessor', index=False)
             output.seek(0)
             st.sidebar.download_button(
                 label="Download Excel",
@@ -190,15 +239,35 @@ if uploaded_files:
                 mime='text/csv',
             )
 
-    # Definir tema escuro
-    st.markdown(
-        """
-        <style>
-        .css-18e3th9 {
-            background-color: #0e1117;
-            color: #ffffff;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
+# Função principal
+def main():
+    """
+    Função principal que executa o aplicativo Streamlit.
+    """
+    # Obter os últimos 6 meses
+    months = get_last_6_months()
+
+    # Criar um dicionário para armazenar os arquivos carregados
+    uploaded_files = {}
+
+    # Criar espaços de upload para cada mês
+    st.title("Carregue os arquivos Excel para cada mês")
+    for month in months:
+        uploaded_file = st.file_uploader(f"Arquivo para {month}", type="xlsx", key=month)
+        if uploaded_file:
+            uploaded_files[month] = uploaded_file
+
+    if uploaded_files:
+        with st.spinner('Carregando e processando os dados...'):
+            data = carregar_dados(uploaded_files)
+            if not data.empty:
+                data = processar_dados(data)
+                gerar_graficos(data, months)
+                st.success('Dados carregados e gráficos gerados com sucesso!')
+            else:
+                st.warning('Nenhum dado foi carregado.')
+    else:
+        st.info('Por favor, carregue os arquivos Excel para visualizar o dashboard.')
+
+if __name__ == "__main__":
+    main()
