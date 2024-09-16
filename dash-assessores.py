@@ -15,26 +15,23 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Função para obter os últimos 6 meses, incluindo Outubro e excluindo Abril
+# Função para obter os meses de Maio a Outubro de 2023, excluindo Abril
 def get_last_6_months():
     """
-    Retorna uma lista com os nomes dos últimos 6 meses no formato 'Mês Ano',
-    incluindo Outubro e excluindo Abril.
+    Retorna uma lista com os nomes dos meses de Maio a Outubro de 2023, excluindo Abril.
     """
     today = datetime.now()
-    # Ajustar a data para incluir Outubro
+    start_date = datetime(today.year, today.month, 1) + relativedelta(months=1)
     months = []
-    count = 0
-    i = -1  # Começar em -1 para incluir o próximo mês (Outubro)
-    while count < 6:
-        date = today + relativedelta(months=i)
+    i = 0
+    while len(months) < 6:
+        date = start_date - relativedelta(months=i)
         month_name = calendar.month_name[date.month]
         year = date.year
         if month_name != 'April':
             months.append(f"{month_name} {year}")
-            count += 1
-        i -= 1
-    return months[::-1]  # Inverter a lista para ordem cronológica
+        i += 1
+    return months[::-1]
 
 # Função para carregar dados dos arquivos Excel
 @st.cache_data
@@ -139,40 +136,40 @@ def gerar_graficos(data, months):
     """
     # Sidebar para selecionar filtros
     st.sidebar.title("Filtros")
-    mes_selecionado = st.sidebar.selectbox("Selecione o Mês", options=months)
+    meses_selecionados = st.sidebar.multiselect("Selecione o(s) Mês(es)", options=months, default=months)
 
-    # Filtrar os dados pelo mês selecionado
-    data_mes = data[data['Mês'] == mes_selecionado]
+    # Filtrar os dados pelos meses selecionados
+    data_selecionada = data[data['Mês'].isin(meses_selecionados)]
 
-    # Verificar se há dados para o mês selecionado
-    if data_mes.empty:
-        st.warning(f"Não há dados disponíveis para {mes_selecionado}.")
+    # Verificar se há dados para os meses selecionados
+    if data_selecionada.empty:
+        st.warning(f"Não há dados disponíveis para os meses selecionados.")
         return
 
     # Agrupar os dados por assessor e somar as receitas
     colunas_receita = ['Receita Bovespa', 'Receita Futuros', 'Receita RF Bancários',
                        'Receita RF Privados', 'Receita RF Públicos', 'Receita no Mês']
-    receita_por_assessor = data_mes.groupby('Nome Assessor')[colunas_receita].sum().reset_index()
+    receita_por_assessor = data_selecionada.groupby('Nome Assessor')[colunas_receita].sum().reset_index()
 
-    # Ranking dos assessores por receita no mês
+    # Ranking dos assessores por receita
     ranking = receita_por_assessor[['Nome Assessor', 'Receita no Mês']].sort_values(by='Receita no Mês', ascending=False)
 
     # Selecionar o assessor
     assessor_selecionado = st.sidebar.selectbox("Selecione um Assessor", options=ranking['Nome Assessor'])
 
-    st.title(f"Dashboard de Receitas - {mes_selecionado}")
+    st.title(f"Dashboard de Receitas - Meses Selecionados")
 
     # Gráfico de barras para o ranking de assessores
     fig_ranking = px.bar(ranking, x='Nome Assessor', y='Receita no Mês',
-                         title=f"Ranking de Assessores - {mes_selecionado}",
+                         title=f"Ranking de Assessores",
                          labels={'Nome Assessor': 'Assessor', 'Receita no Mês': 'Receita (R$)'},
                          text='Receita no Mês')
     fig_ranking.update_traces(texttemplate='%{text:.2f}', textposition='outside')
     fig_ranking.update_layout(xaxis_tickangle=-45)
     st.plotly_chart(fig_ranking)
 
-    # Remover duplicatas de clientes por assessor dentro do mês selecionado
-    unique_clients = data_mes[['Nome Assessor', 'Cliente']].drop_duplicates()
+    # Remover duplicatas de clientes por assessor nos meses selecionados
+    unique_clients = data_selecionada[['Nome Assessor', 'Cliente']].drop_duplicates()
 
     # Contar o número de clientes únicos por assessor
     clientes_por_assessor = unique_clients.groupby('Nome Assessor').size().reset_index(name='Número de Clientes')
@@ -184,7 +181,7 @@ def gerar_graficos(data, months):
 
     # Gráfico de barras para o número de clientes por assessor
     fig_clientes = px.bar(clientes_por_assessor, x='Nome Assessor', y='Número de Clientes',
-                          title="Número de Clientes por Assessor",
+                          title="Número de Clientes Únicos por Assessor",
                           labels={'Nome Assessor': 'Assessor', 'Número de Clientes': 'Número de Clientes'},
                           text='Número de Clientes')
     fig_clientes.update_traces(texttemplate='%{text:.0f}', textposition='outside')
@@ -192,11 +189,11 @@ def gerar_graficos(data, months):
     st.plotly_chart(fig_clientes)
 
     # Filtrar os dados para o assessor selecionado
-    dados_assessor = data_mes[data_mes['Nome Assessor'] == assessor_selecionado]
+    dados_assessor = data_selecionada[data_selecionada['Nome Assessor'] == assessor_selecionado]
 
     # Verificar se há dados para o assessor selecionado
     if dados_assessor.empty:
-        st.warning(f"O assessor {assessor_selecionado} não possui dados para {mes_selecionado}.")
+        st.warning(f"O assessor {assessor_selecionado} não possui dados nos meses selecionados.")
         return
 
     # Filtrar os clientes que geraram mais receita
@@ -205,7 +202,7 @@ def gerar_graficos(data, months):
     # Converter o código do cliente para string
     clientes_por_receita['Cliente'] = clientes_por_receita['Cliente'].astype(str)
 
-    # Ordenar os clientes pela receita no mês
+    # Ordenar os clientes pela receita
     ranking_clientes = clientes_por_receita.sort_values(by='Receita no Mês', ascending=False)
 
     # Formatar a coluna de receita em BRL
@@ -213,7 +210,7 @@ def gerar_graficos(data, months):
         lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
     # Exibir ranking dos clientes
-    st.subheader(f"Ranking de Clientes - {assessor_selecionado} - {mes_selecionado}")
+    st.subheader(f"Ranking de Clientes - {assessor_selecionado}")
     st.dataframe(ranking_clientes)
 
     # Gráfico de Radar
@@ -252,7 +249,7 @@ def gerar_graficos(data, months):
             st.sidebar.download_button(
                 label="Download Excel",
                 data=output,
-                file_name=f'dados_filtrados_{mes_selecionado}.xlsx',
+                file_name=f'dados_filtrados.xlsx',
                 mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             )
         elif export_format == 'CSV':
@@ -260,7 +257,7 @@ def gerar_graficos(data, months):
             st.sidebar.download_button(
                 label="Download CSV",
                 data=csv,
-                file_name=f'dados_filtrados_{mes_selecionado}.csv',
+                file_name=f'dados_filtrados.csv',
                 mime='text/csv',
             )
 
@@ -269,7 +266,7 @@ def main():
     """
     Função principal que executa o aplicativo Streamlit.
     """
-    # Obter os últimos 6 meses incluindo Outubro e excluindo Abril
+    # Obter os meses de Maio a Outubro de 2023
     months = get_last_6_months()
 
     # Criar um dicionário para armazenar os arquivos carregados
@@ -278,9 +275,10 @@ def main():
     # Criar espaços de upload para cada mês
     st.title("Carregue os arquivos Excel para cada mês")
     for month in months:
-        uploaded_file = st.file_uploader(f"Arquivo para {month}", type="xlsx", key=month)
-        if uploaded_file:
-            uploaded_files[month] = uploaded_file
+        if month != 'April':
+            uploaded_file = st.file_uploader(f"Arquivo para {month}", type="xlsx", key=month)
+            if uploaded_file:
+                uploaded_files[month] = uploaded_file
 
     if uploaded_files:
         with st.spinner('Carregando e processando os dados...'):
