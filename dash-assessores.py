@@ -153,8 +153,11 @@ def gerar_graficos(data, months):
     fig_ranking.update_layout(xaxis_tickangle=-45)
     st.plotly_chart(fig_ranking)
 
-    # Gráfico de número de clientes por assessor
-    clientes_por_assessor = data_mes.groupby('Nome Assessor')['Cliente'].nunique().reset_index()
+    # Remover duplicatas de clientes por assessor
+    unique_clients = data_mes[['Nome Assessor', 'Cliente']].drop_duplicates()
+
+    # Contar o número de clientes únicos por assessor
+    clientes_por_assessor = unique_clients.groupby('Nome Assessor')['Cliente'].count().reset_index()
     clientes_por_assessor = clientes_por_assessor.rename(columns={'Cliente': 'Número de Clientes'})
 
     # Ordenar os assessores com base no ranking de receita
