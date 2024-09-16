@@ -15,18 +15,25 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Função para obter os últimos 6 meses
+# Função para obter os últimos 6 meses, incluindo Outubro e excluindo Abril
 def get_last_6_months():
     """
-    Retorna uma lista com os nomes dos últimos 6 meses no formato 'Mês Ano'.
+    Retorna uma lista com os nomes dos últimos 6 meses no formato 'Mês Ano',
+    incluindo Outubro e excluindo Abril.
     """
     today = datetime.now()
+    # Ajustar a data para incluir Outubro
     months = []
-    for i in range(6):
-        date = today - relativedelta(months=i)
+    count = 0
+    i = -1  # Começar em -1 para incluir o próximo mês (Outubro)
+    while count < 6:
+        date = today + relativedelta(months=i)
         month_name = calendar.month_name[date.month]
         year = date.year
-        months.append(f"{month_name} {year}")
+        if month_name != 'April':
+            months.append(f"{month_name} {year}")
+            count += 1
+        i -= 1
     return months[::-1]  # Inverter a lista para ordem cronológica
 
 # Função para carregar dados dos arquivos Excel
@@ -108,6 +115,12 @@ def processar_dados(data):
     data['Nome Assessor'] = data['Assessor'].map(assessores_dict)
     data['Nome Assessor'] = data['Nome Assessor'].fillna('Assessor Desconhecido')
 
+    # Padronizar os identificadores de clientes
+    data['Cliente'] = data['Cliente'].astype(str).str.strip().str.upper()
+
+    # Remover valores nulos ou vazios em 'Cliente'
+    data = data[data['Cliente'] != '']
+
     # Substituir valores NaN por 0 para somar corretamente as receitas
     colunas_receita = ['Receita Bovespa', 'Receita Futuros', 'Receita RF Bancários',
                        'Receita RF Privados', 'Receita RF Públicos', 'Receita no Mês']
@@ -131,6 +144,11 @@ def gerar_graficos(data, months):
     # Filtrar os dados pelo mês selecionado
     data_mes = data[data['Mês'] == mes_selecionado]
 
+    # Verificar se há dados para o mês selecionado
+    if data_mes.empty:
+        st.warning(f"Não há dados disponíveis para {mes_selecionado}.")
+        return
+
     # Agrupar os dados por assessor e somar as receitas
     colunas_receita = ['Receita Bovespa', 'Receita Futuros', 'Receita RF Bancários',
                        'Receita RF Privados', 'Receita RF Públicos', 'Receita no Mês']
@@ -153,12 +171,11 @@ def gerar_graficos(data, months):
     fig_ranking.update_layout(xaxis_tickangle=-45)
     st.plotly_chart(fig_ranking)
 
-    # Remover duplicatas de clientes por assessor
+    # Remover duplicatas de clientes por assessor dentro do mês selecionado
     unique_clients = data_mes[['Nome Assessor', 'Cliente']].drop_duplicates()
 
     # Contar o número de clientes únicos por assessor
-    clientes_por_assessor = unique_clients.groupby('Nome Assessor')['Cliente'].count().reset_index()
-    clientes_por_assessor = clientes_por_assessor.rename(columns={'Cliente': 'Número de Clientes'})
+    clientes_por_assessor = unique_clients.groupby('Nome Assessor').size().reset_index(name='Número de Clientes')
 
     # Ordenar os assessores com base no ranking de receita
     clientes_por_assessor['Ordem Receita'] = clientes_por_assessor['Nome Assessor'].map(
@@ -176,6 +193,11 @@ def gerar_graficos(data, months):
 
     # Filtrar os dados para o assessor selecionado
     dados_assessor = data_mes[data_mes['Nome Assessor'] == assessor_selecionado]
+
+    # Verificar se há dados para o assessor selecionado
+    if dados_assessor.empty:
+        st.warning(f"O assessor {assessor_selecionado} não possui dados para {mes_selecionado}.")
+        return
 
     # Filtrar os clientes que geraram mais receita
     clientes_por_receita = dados_assessor.groupby('Cliente')['Receita no Mês'].sum().reset_index()
@@ -247,7 +269,7 @@ def main():
     """
     Função principal que executa o aplicativo Streamlit.
     """
-    # Obter os últimos 6 meses
+    # Obter os últimos 6 meses incluindo Outubro e excluindo Abril
     months = get_last_6_months()
 
     # Criar um dicionário para armazenar os arquivos carregados
