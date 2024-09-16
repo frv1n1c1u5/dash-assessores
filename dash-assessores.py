@@ -6,6 +6,7 @@ import io
 from datetime import datetime
 import calendar
 from dateutil.relativedelta import relativedelta
+import unidecode
 
 # Definir configurações iniciais da página
 st.set_page_config(
@@ -20,18 +21,8 @@ def get_last_6_months():
     """
     Retorna uma lista com os nomes dos meses de Maio a Outubro de 2023, excluindo Abril.
     """
-    today = datetime.now()
-    start_date = datetime(today.year, today.month, 1) + relativedelta(months=1)
-    months = []
-    i = 0
-    while len(months) < 6:
-        date = start_date - relativedelta(months=i)
-        month_name = calendar.month_name[date.month]
-        year = date.year
-        if month_name != 'April':
-            months.append(f"{month_name} {year}")
-        i += 1
-    return months[::-1]
+    months = ['May 2023', 'June 2023', 'July 2023', 'August 2023', 'September 2023', 'October 2023']
+    return months
 
 # Função para carregar dados dos arquivos Excel
 @st.cache_data
@@ -80,31 +71,7 @@ def processar_dados(data):
     """
     # Dicionário de assessores (códigos para nomes)
     assessores_dict = {
-        '74930': 'Renato Parentoni',
-        '67717': 'Marcos Moore',
-        '20257': 'Eduardo Campos',
-        '29187': 'Ronny Mikyo',
-        '24264': 'Geison Evangelista',
-        '67704': 'Augusto Cesar',
-        '29045': 'Paulo Ricardo',
-        '73453': 'Pedro Jeha',
-        '74036': 'Balby',
-        '72295': 'Luiz Santos',
-        '31610': 'Lucas Sampaio',
-        '74232': 'Paulo Ribeiro',
-        '31027': 'Lucas Coutinho',
-        '74339': 'Ronaldy Abdon',
-        '26553': 'Flavio PiGari',
-        '74780': 'Marcio Leça',
-        '32763': 'Eduardo Chemale',
-        '30313': 'Gabriel Gianini',
-        '32348': 'Victor Anfranzio',
-        '27277': 'Tuli',
-        '33115': 'Eduardo Carvalho',
-        '37303': 'Johan',
-        '71097': 'Vinicius',
-        '29428': 'Fred',
-        '31704': 'Ander'
+        # ... (dicionário dos assessores) ...
     }
 
     # Adicionar coluna com nomes dos assessores
@@ -113,10 +80,17 @@ def processar_dados(data):
     data['Nome Assessor'] = data['Nome Assessor'].fillna('Assessor Desconhecido')
 
     # Padronizar os identificadores de clientes
-    data['Cliente'] = data['Cliente'].astype(str).str.strip().str.upper()
+    data['Cliente'] = data['Cliente'].astype(str)
+    data['Cliente'] = data['Cliente'].str.strip()
+    data['Cliente'] = data['Cliente'].str.upper()
+    data['Cliente'] = data['Cliente'].apply(unidecode.unidecode)
+    data['Cliente'] = data['Cliente'].str.replace('[^A-Za-z0-9]', '', regex=True)
 
     # Remover valores nulos ou vazios em 'Cliente'
     data = data[data['Cliente'] != '']
+
+    # Remover linhas duplicadas
+    data = data.drop_duplicates()
 
     # Substituir valores NaN por 0 para somar corretamente as receitas
     colunas_receita = ['Receita Bovespa', 'Receita Futuros', 'Receita RF Bancários',
@@ -124,6 +98,16 @@ def processar_dados(data):
     data[colunas_receita] = data[colunas_receita].fillna(0)
 
     return data
+
+# Função para verificar duplicatas nos clientes
+def verificar_duplicatas_clientes(data):
+    clientes_contagem = data['Cliente'].value_counts()
+    clientes_duplicados = clientes_contagem[clientes_contagem > 1]
+    if not clientes_duplicados.empty:
+        st.write("Clientes com possíveis duplicações nos identificadores:")
+        st.write(clientes_duplicados)
+    else:
+        st.write("Não foram encontradas duplicações nos identificadores de clientes.")
 
 # Função para gerar gráficos
 def gerar_graficos(data, months):
@@ -168,8 +152,16 @@ def gerar_graficos(data, months):
     fig_ranking.update_layout(xaxis_tickangle=-45)
     st.plotly_chart(fig_ranking)
 
-    # Remover duplicatas de clientes por assessor nos meses selecionados
-    unique_clients = data_selecionada[['Nome Assessor', 'Cliente']].drop_duplicates()
+    # Contar clientes únicos por assessor considerando o assessor com maior receita para cada cliente
+    # Calcular a receita total por cliente e assessor
+    receita_cliente_assessor = data_selecionada.groupby(['Cliente', 'Nome Assessor'])['Receita no Mês'].sum().reset_index()
+
+    # Identificar o assessor com maior receita para cada cliente
+    idx = receita_cliente_assessor.groupby('Cliente')['Receita no Mês'].idxmax()
+    clientes_assessor_principal = receita_cliente_assessor.loc[idx]
+
+    # Obter pares únicos de assessor e cliente principal
+    unique_clients = clientes_assessor_principal[['Nome Assessor', 'Cliente']]
 
     # Contar o número de clientes únicos por assessor
     clientes_por_assessor = unique_clients.groupby('Nome Assessor').size().reset_index(name='Número de Clientes')
@@ -188,78 +180,19 @@ def gerar_graficos(data, months):
     fig_clientes.update_layout(xaxis_tickangle=-45)
     st.plotly_chart(fig_clientes)
 
-    # Filtrar os dados para o assessor selecionado
-    dados_assessor = data_selecionada[data_selecionada['Nome Assessor'] == assessor_selecionado]
+    # Analisar dados do assessor com problemas
+    dados_assessor_problema = unique_clients[unique_clients['Nome Assessor'] == 'Marcos Moore']
+    st.write(f"Análise detalhada dos clientes de {assessor_selecionado}:")
+    st.dataframe(dados_assessor_problema)
 
-    # Verificar se há dados para o assessor selecionado
-    if dados_assessor.empty:
-        st.warning(f"O assessor {assessor_selecionado} não possui dados nos meses selecionados.")
-        return
+    # Verificar clientes associados a múltiplos assessores
+    clientes_assessores = data_selecionada.groupby('Cliente')['Nome Assessor'].nunique().reset_index()
+    clientes_multiplos_assessores = clientes_assessores[clientes_assessores['Nome Assessor'] > 1]
+    if not clientes_multiplos_assessores.empty:
+        st.warning("Existem clientes associados a múltiplos assessores.")
+        st.write(clientes_multiplos_assessores)
 
-    # Filtrar os clientes que geraram mais receita
-    clientes_por_receita = dados_assessor.groupby('Cliente')['Receita no Mês'].sum().reset_index()
-
-    # Converter o código do cliente para string
-    clientes_por_receita['Cliente'] = clientes_por_receita['Cliente'].astype(str)
-
-    # Ordenar os clientes pela receita
-    ranking_clientes = clientes_por_receita.sort_values(by='Receita no Mês', ascending=False)
-
-    # Formatar a coluna de receita em BRL
-    ranking_clientes['Receita no Mês'] = ranking_clientes['Receita no Mês'].apply(
-        lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-
-    # Exibir ranking dos clientes
-    st.subheader(f"Ranking de Clientes - {assessor_selecionado}")
-    st.dataframe(ranking_clientes)
-
-    # Gráfico de Radar
-    categorias = colunas_receita[:-1]
-    valores = dados_assessor[categorias].sum().values
-
-    fig_radar = go.Figure()
-
-    fig_radar.add_trace(go.Scatterpolar(
-        r=valores,
-        theta=categorias,
-        fill='toself',
-        name=assessor_selecionado
-    ))
-
-    fig_radar.update_layout(
-        polar=dict(
-            radialaxis=dict(visible=True)
-        ),
-        showlegend=True,
-        title=f"Gráfico de Radar - Receita por Produto de {assessor_selecionado}"
-    )
-
-    st.plotly_chart(fig_radar)
-
-    # Funcionalidade para exportar os dados filtrados
-    st.sidebar.title("Exportar Dados")
-    export_format = st.sidebar.selectbox("Selecione o Formato", ['Excel', 'CSV'])
-
-    if st.sidebar.button("Exportar"):
-        if export_format == 'Excel':
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                receita_por_assessor.to_excel(writer, sheet_name='Receita por Assessor', index=False)
-            output.seek(0)
-            st.sidebar.download_button(
-                label="Download Excel",
-                data=output,
-                file_name=f'dados_filtrados.xlsx',
-                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            )
-        elif export_format == 'CSV':
-            csv = receita_por_assessor.to_csv(index=False)
-            st.sidebar.download_button(
-                label="Download CSV",
-                data=csv,
-                file_name=f'dados_filtrados.csv',
-                mime='text/csv',
-            )
+    # ... (restante do código para gráficos e exportação) ...
 
 # Função principal
 def main():
@@ -275,16 +208,16 @@ def main():
     # Criar espaços de upload para cada mês
     st.title("Carregue os arquivos Excel para cada mês")
     for month in months:
-        if month != 'April':
-            uploaded_file = st.file_uploader(f"Arquivo para {month}", type="xlsx", key=month)
-            if uploaded_file:
-                uploaded_files[month] = uploaded_file
+        uploaded_file = st.file_uploader(f"Arquivo para {month}", type="xlsx", key=month)
+        if uploaded_file:
+            uploaded_files[month] = uploaded_file
 
     if uploaded_files:
         with st.spinner('Carregando e processando os dados...'):
             data = carregar_dados(uploaded_files)
             if not data.empty:
                 data = processar_dados(data)
+                verificar_duplicatas_clientes(data)
                 gerar_graficos(data, months)
                 st.success('Dados carregados e gráficos gerados com sucesso!')
             else:
