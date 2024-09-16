@@ -284,4 +284,4 @@ def main():
         st.info('Por favor, carregue os arquivos Excel para visualizar o dashboard.')
 
 if __name__ == "__main__":
-    main(
+    main()
