@@ -25,7 +25,7 @@ def get_last_6_months():
     return months
 
 # Função para carregar dados dos arquivos Excel
-@st.cache_data
+@st.cache  # Substituído para compatibilidade
 def carregar_dados(uploaded_files):
     """
     Carrega e concatena os dados dos arquivos Excel fornecidos.
@@ -123,16 +123,6 @@ def processar_dados(data):
 
     return data
 
-# Função para verificar duplicatas nos clientes
-def verificar_duplicatas_clientes(data):
-    clientes_contagem = data['Cliente'].value_counts()
-    clientes_duplicados = clientes_contagem[clientes_contagem > 1]
-    if not clientes_duplicados.empty:
-        st.write("Clientes com possíveis duplicações nos identificadores:")
-        st.write(clientes_duplicados)
-    else:
-        st.write("Não foram encontradas duplicações nos identificadores de clientes.")
-
 # Função para gerar gráficos
 def gerar_graficos(data, months):
     """
@@ -178,4 +168,134 @@ def gerar_graficos(data, months):
 
     # Contar clientes únicos por assessor considerando o assessor com maior receita para cada cliente
     # Calcular a receita total por cliente e assessor
-    receita_cliente_assessor = data_selecionada
+    receita_cliente_assessor = data_selecionada.groupby(['Cliente', 'Nome Assessor'])['Receita no Mês'].sum().reset_index()
+
+    # Identificar o assessor com maior receita para cada cliente
+    idx = receita_cliente_assessor.groupby('Cliente')['Receita no Mês'].idxmax()
+    clientes_assessor_principal = receita_cliente_assessor.loc[idx]
+
+    # Obter pares únicos de assessor e cliente principal
+    unique_clients = clientes_assessor_principal[['Nome Assessor', 'Cliente']]
+
+    # Contar o número de clientes únicos por assessor
+    clientes_por_assessor = unique_clients.groupby('Nome Assessor').size().reset_index(name='Número de Clientes')
+
+    # Ordenar os assessores com base no ranking de receita
+    clientes_por_assessor['Ordem Receita'] = clientes_por_assessor['Nome Assessor'].map(
+        ranking.set_index('Nome Assessor')['Receita no Mês'])
+    clientes_por_assessor = clientes_por_assessor.sort_values(by='Ordem Receita', ascending=False)
+
+    # Gráfico de barras para o número de clientes por assessor
+    fig_clientes = px.bar(clientes_por_assessor, x='Nome Assessor', y='Número de Clientes',
+                          title="Número de Clientes Únicos por Assessor",
+                          labels={'Nome Assessor': 'Assessor', 'Número de Clientes': 'Número de Clientes'},
+                          text='Número de Clientes')
+    fig_clientes.update_traces(texttemplate='%{text:.0f}', textposition='outside')
+    fig_clientes.update_layout(xaxis_tickangle=-45)
+    st.plotly_chart(fig_clientes)
+
+    # Filtrar os dados para o assessor selecionado
+    dados_assessor = data_selecionada[data_selecionada['Nome Assessor'] == assessor_selecionado]
+
+    # Verificar se há dados para o assessor selecionado
+    if dados_assessor.empty:
+        st.warning(f"O assessor {assessor_selecionado} não possui dados nos meses selecionados.")
+        return
+
+    # Filtrar os clientes que geraram mais receita
+    clientes_por_receita = dados_assessor.groupby('Cliente')['Receita no Mês'].sum().reset_index()
+
+    # Converter o código do cliente para string
+    clientes_por_receita['Cliente'] = clientes_por_receita['Cliente'].astype(str)
+
+    # Ordenar os clientes pela receita
+    ranking_clientes = clientes_por_receita.sort_values(by='Receita no Mês', ascending=False)
+
+    # Formatar a coluna de receita em BRL
+    ranking_clientes['Receita no Mês'] = ranking_clientes['Receita no Mês'].apply(
+        lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+
+    # Exibir ranking dos clientes
+    st.subheader(f"Ranking de Clientes - {assessor_selecionado}")
+    st.dataframe(ranking_clientes)
+
+    # Gráfico de Radar
+    categorias = colunas_receita[:-1]
+    valores = dados_assessor[categorias].sum().values
+
+    fig_radar = go.Figure()
+
+    fig_radar.add_trace(go.Scatterpolar(
+        r=valores,
+        theta=categorias,
+        fill='toself',
+        name=assessor_selecionado
+    ))
+
+    fig_radar.update_layout(
+        polar=dict(
+            radialaxis=dict(visible=True)
+        ),
+        showlegend=True,
+        title=f"Gráfico de Radar - Receita por Produto de {assessor_selecionado}"
+    )
+
+    st.plotly_chart(fig_radar)
+
+    # Funcionalidade para exportar os dados filtrados
+    st.sidebar.title("Exportar Dados")
+    export_format = st.sidebar.selectbox("Selecione o Formato", ['Excel', 'CSV'])
+
+    if st.sidebar.button("Exportar"):
+        if export_format == 'Excel':
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                receita_por_assessor.to_excel(writer, sheet_name='Receita por Assessor', index=False)
+            output.seek(0)
+            st.sidebar.download_button(
+                label="Download Excel",
+                data=output,
+                file_name=f'dados_filtrados.xlsx',
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+        elif export_format == 'CSV':
+            csv = receita_por_assessor.to_csv(index=False)
+            st.sidebar.download_button(
+                label="Download CSV",
+                data=csv,
+                file_name=f'dados_filtrados.csv',
+                mime='text/csv',
+            )
+
+# Função principal
+def main():
+    """
+    Função principal que executa o aplicativo Streamlit.
+    """
+    # Obter os meses de Maio a Outubro de 2023
+    months = get_last_6_months()
+
+    # Criar um dicionário para armazenar os arquivos carregados
+    uploaded_files = {}
+
+    # Criar espaços de upload para cada mês
+    st.title("Carregue os arquivos Excel para cada mês")
+    for month in months:
+        uploaded_file = st.file_uploader(f"Arquivo para {month}", type="xlsx", key=month)
+        if uploaded_file:
+            uploaded_files[month] = uploaded_file
+
+    if uploaded_files:
+        with st.spinner('Carregando e processando os dados...'):
+            data = carregar_dados(uploaded_files)
+            if not data.empty:
+                data = processar_dados(data)
+                gerar_graficos(data, months)
+                st.success('Dados carregados e gráficos gerados com sucesso!')
+            else:
+                st.warning('Nenhum dado foi carregado.')
+    else:
+        st.info('Por favor, carregue os arquivos Excel para visualizar o dashboard.')
+
+if __name__ == "__main__":
+    main()
